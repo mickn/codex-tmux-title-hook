@@ -7,6 +7,7 @@ set -euo pipefail
 
 TITLE_WIDTH=18
 TITLE_GENERATOR_MODEL="gpt-5.4-mini"
+TITLE_GENERATOR_REASONING_EFFORT="low"
 TITLE_GENERATOR_GUARD="CODEX_TMUX_TITLE_DISABLE"
 
 continue_hook() {
@@ -51,9 +52,13 @@ generate_title_with_codex() {
   local prompt="$1"
   local dir="$2"
   local prompt_file output_file title=""
+  local original_home title_home auth_source
 
   prompt_file=$(mktemp)
   output_file=$(mktemp)
+  original_home="${HOME:-}"
+  title_home=$(mktemp -d)
+  auth_source="$original_home/.codex/auth.json"
 
   cat >"$prompt_file" <<EOF
 Write a tmux window title for an active coding session.
@@ -70,9 +75,24 @@ User prompt:
 $prompt
 EOF
 
-  if env "$TITLE_GENERATOR_GUARD"=1 codex exec - \
-    -c features.codex_hooks=false \
-    -m "$TITLE_GENERATOR_MODEL" \
+  mkdir -p "$title_home/.codex"
+  if [[ -f "$auth_source" ]]; then
+    cp "$auth_source" "$title_home/.codex/auth.json"
+  fi
+
+  cat >"$title_home/.codex/config.toml" <<EOF
+model = "$TITLE_GENERATOR_MODEL"
+model_reasoning_effort = "$TITLE_GENERATOR_REASONING_EFFORT"
+approval_policy = "never"
+sandbox_mode = "read-only"
+rmcp_client = false
+
+[features]
+codex_hooks = false
+EOF
+
+  if env HOME="$title_home" "$TITLE_GENERATOR_GUARD"=1 codex exec - \
+    --ephemeral \
     --skip-git-repo-check \
     --json \
     --color never \
@@ -84,6 +104,7 @@ EOF
     title=$(clean_text "$(cat "$output_file" 2>/dev/null || true)")
   fi
 
+  rm -rf "$title_home"
   rm -f "$prompt_file" "$output_file"
 
   echo "$title"

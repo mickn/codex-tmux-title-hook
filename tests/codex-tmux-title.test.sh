@@ -62,6 +62,11 @@ EOF
 set -euo pipefail
 LOG_FILE=${CODEX_LOG_FILE:?}
 printf 'codex %s\n' "$*" >>"$LOG_FILE"
+printf 'HOME=%s\n' "${HOME:-}" >>"$LOG_FILE"
+if [[ -f "${HOME:-}/.codex/config.toml" ]]; then
+  printf -- '--- config.toml ---\n' >>"$LOG_FILE"
+  cat "${HOME}/.codex/config.toml" >>"$LOG_FILE"
+fi
 OUTPUT_FILE=""
 while (($#)); do
   case "$1" in
@@ -98,6 +103,9 @@ test_user_prompt_submit_generates_short_title() {
 
   local tmux_log="$tmpdir/tmux.log"
   local codex_log="$tmpdir/codex.log"
+  local home_dir="$tmpdir/home"
+  mkdir -p "$home_dir/.codex"
+  printf 'test-auth\n' >"$home_dir/.codex/auth.json"
   : >"$tmux_log"
   : >"$codex_log"
 
@@ -108,6 +116,7 @@ test_user_prompt_submit_generates_short_title() {
     TMUX_LOG_FILE="$tmux_log" \
     CODEX_LOG_FILE="$codex_log" \
     FAKE_CODEX_OUTPUT="Hook Focus" \
+    HOME="$home_dir" \
     "$HOOK_SCRIPT" <<'EOF'
 {"hook_event_name":"UserPromptSubmit","cwd":"/tmp/example","prompt":"change tmux title hook to use codex exec summaries"}
 EOF
@@ -115,8 +124,13 @@ EOF
 
   assert_contains "$output" '"continue": true'
   assert_contains "$(cat "$codex_log")" 'codex exec'
-  assert_contains "$(cat "$codex_log")" 'features.codex_hooks=false'
+  assert_contains "$(cat "$codex_log")" 'HOME='
   assert_contains "$(cat "$codex_log")" 'gpt-5.4-mini'
+  assert_contains "$(cat "$codex_log")" 'codex_hooks = false'
+  assert_contains "$(cat "$codex_log")" 'model_reasoning_effort = "low"'
+  if [[ "$(cat "$codex_log")" == *"HOME=$home_dir"* ]]; then
+    fail "expected codex to run in a temporary bare HOME, not [$home_dir]"
+  fi
   assert_contains "$(cat "$tmux_log")" 'tmux rename-window -t 3 Hook Focus'
 }
 
